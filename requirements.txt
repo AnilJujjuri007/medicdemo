@@ -1,0 +1,4 @@
+flask
+flasgger
+json
+azure.iot.devices
