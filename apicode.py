@@ -62,6 +62,3 @@ def send_data():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
  
-if __name__ == '__main__':
-    print("Press Ctrl-C to exit")
-    app.run(debug=True, port=3000)
