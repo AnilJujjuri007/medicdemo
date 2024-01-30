@@ -5,13 +5,19 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import json
 import math
 import random
+import paho.mqtt.client as mqtt
+
 app = Flask(__name__)
+
 # Azure IoT Hub connection string
 CONNECTION_STRING = "HostName=EDGTneerTrainingPractice.azure-devices.net;DeviceId=menderclient;SharedAccessKey=Sjr8fBZiUYQwksGYpyzlySO8WrnqkkartEbfTQhlo68="
- 
+
 # Initialize Azure IoT Hub client
 client = IoTHubDeviceClient.create_from_connection_string(CONNECTION_STRING)
- 
+
+# MQTT topic for telemetry
+MQTT_TOPIC = "devices/menderclient/messages/events/"
+
 def read_modbus_data(modbus_host):
     try:
         # Connect to Modbus device (Modbus TCP)
@@ -20,59 +26,69 @@ def read_modbus_data(modbus_host):
             result = client.read_holding_registers(address=0, count=2)
             if result.isError():
                 raise Exception(f"Modbus Error: {result.message}")
- 
+
             # Extract data from Modbus response
             data = {
                 "register_0": result.registers[0],
                 "register_1": result.registers[1]
             }
- 
+
             return data
     except Exception as e:
         raise Exception(f"Modbus Error: {str(e)}")
- 
+
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected with result code {rc}")
+
 def send_modbus_telemetry(modbus_host):
     try:
         # Read Modbus data
         modbus_data = read_modbus_data(modbus_host)
-       
+
         temperature = modbus_data["register_0"]  # Adjust based on your data structure
         humidity = modbus_data["register_1"]
-        # Adjust based on your data structure
-        Id =random.randint(0,1000)
+        Id = random.randint(0, 1000)
+
         # Convert Modbus data to JSON string
-        MSG_SND = '{{"Id":{Id},"temperature": {temperature},"humidity": {humidity}}}'
-        msg_txt_formatted = MSG_SND.format(Id=Id,temperature=temperature, humidity=humidity)
-        # message = Message(json.dumps(telemetry_message))
-        # message.content_encoding="utf-8"
-        # message.content_type="application/json"
-        message = Message(msg_txt_formatted)
-        print( "Sending message: {}".format(message))
-        # Send telemetry data to Azure IoT Hub
-        client.send_message(message)
-       
- 
-        print("Telemetry sent successfully")
+        telemetry_message = {
+            "Id": Id,
+            "temperature": temperature,
+            "humidity": humidity
+        }
+
+        # Connect to Azure IoT Hub using MQTT
+        mqtt_client = mqtt.Client()
+        mqtt_client.on_connect = on_connect
+
+        # Connect to Azure IoT Hub
+        mqtt_client.username_pw_set(username=CONNECTION_STRING, password=None)
+        mqtt_client.connect("EDGTneerTrainingPractice.azure-devices.net", port=8883, keepalive=60)
+
+        # Publish telemetry data to Azure IoT Hub using MQTT
+        mqtt_client.publish(MQTT_TOPIC, payload=json.dumps(telemetry_message), qos=1)
+
+        print("Telemetry sent successfully via MQTT to Azure IoT Hub")
+        mqtt_client.disconnect()
     except Exception as e:
         print(f"Error sending telemetry: {str(e)}")
- 
+
 @app.route('/telemetry', methods=['POST'])
 def telemetry_endpoint():
     try:
         # Get the Modbus device's IP address from the request
         modbus_host = request.json.get('modbus_host')
- 
+
         # Validate if modbus_host is provided
         if not modbus_host:
             raise ValueError("Modbus host is required in the request JSON.")
- 
+
         # Call the function to send telemetry
         send_modbus_telemetry(modbus_host)
- 
+
         return jsonify({"status": "Telemetry sent successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
- 
+
 # Schedule the background task to run every minute (adjust as needed)
 scheduler = BackgroundScheduler()
 scheduler.add_job(lambda: send_modbus_telemetry("192.168.101.75"), 'interval', minutes=1)  # Default IP address for demonstration
